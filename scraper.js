@@ -17,6 +17,69 @@ class WeChatArticleScraper {
             headingStyle: 'atx',
             codeBlockStyle: 'fenced'
         });
+        this.stepTimers = {};
+    }
+
+    /**
+     * 格式化时间戳
+     */
+    getTimestamp() {
+        return new Date().toISOString();
+    }
+
+    /**
+     * 记录步骤开始
+     */
+    startStep(stepName) {
+        this.stepTimers[stepName] = Date.now();
+    }
+
+    /**
+     * 记录步骤结束并计算用时
+     */
+    endStep(stepName) {
+        if (this.stepTimers[stepName]) {
+            const duration = Date.now() - this.stepTimers[stepName];
+            delete this.stepTimers[stepName];
+            return duration;
+        }
+        return null;
+    }
+
+    /**
+     * 带时间戳的日志输出
+     */
+    log(message, duration = null) {
+        const timestamp = this.getTimestamp();
+        if (duration !== null) {
+            console.log(`[${timestamp}] ${message} (用时: ${duration}ms)`);
+        } else {
+            console.log(`[${timestamp}] ${message}`);
+        }
+    }
+
+    /**
+     * 带时间戳的警告日志
+     */
+    logWarn(message, duration = null) {
+        const timestamp = this.getTimestamp();
+        if (duration !== null) {
+            console.warn(`[${timestamp}] ${message} (用时: ${duration}ms)`);
+        } else {
+            console.warn(`[${timestamp}] ${message}`);
+        }
+    }
+
+    /**
+     * 带时间戳的错误日志
+     */
+    logError(message, duration = null) {
+        const timestamp = this.getTimestamp();
+        if (duration !== null) {
+            console.error(`[${timestamp}] ${message} (用时: ${duration}ms)`);
+        } else {
+            console.error(`[${timestamp}] ${message}`);
+        }
     }
 
     /**
@@ -34,14 +97,16 @@ class WeChatArticleScraper {
             formats = ['markdown', 'html']
         } = options;
 
-        console.log(`正在抓取文章: ${url}`);
-        console.log(`抓取格式: ${formats.join(', ')}`);
+        this.startStep('total');
+        this.log(`正在抓取文章: ${url}`);
+        this.log(`抓取格式: ${formats.join(', ')}`);
 
         let browser = null;
 
         try {
             // 连接到 Scrapeless Browser
-            console.log('✅ 正在连接到 Scrapeless Browser...');
+            this.startStep('connect');
+            this.log('✅ 正在连接到 Scrapeless Browser...');
             browser = await Puppeteer.connect({
                 apiKey: this.apiKey,
                 sessionName: sessionName,
@@ -51,7 +116,7 @@ class WeChatArticleScraper {
                 defaultViewport: null
             });
 
-            console.log('✅ 浏览器连接成功');
+            this.log('✅ 浏览器连接成功', this.endStep('connect'));
 
             // 创建新页面
             const page = await browser.newPage();
@@ -59,7 +124,8 @@ class WeChatArticleScraper {
             // 设置视口大小
             await page.setViewport({ width: 1280, height: 800 });
 
-            console.log('✅ 正在导航到页面...');
+            this.startStep('navigate');
+            this.log('✅ 正在导航到页面...');
 
             // 导航到目标页面
             await page.goto(url, {
@@ -67,13 +133,16 @@ class WeChatArticleScraper {
                 timeout: 60000
             });
 
-            console.log('✅ 页面加载完成');
+            this.log('✅ 页面加载完成', this.endStep('navigate'));
 
             // 等待内容加载
+            this.startStep('wait-content');
             await new Promise(resolve => setTimeout(resolve, 3000));
+            const waitDuration = this.endStep('wait-content');
 
             // 滚动页面触发懒加载图片
-            console.log('📜 滚动页面加载图片...');
+            this.startStep('scroll');
+            this.log('📜 滚动页面加载图片...');
             for (let i = 0; i < 5; i++) {
                 await page.evaluate((scrollY) => {
                     window.scrollTo(0, scrollY);
@@ -85,24 +154,31 @@ class WeChatArticleScraper {
             await page.evaluate(() => window.scrollTo(0, 0));
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            console.log('✅ 图片加载完成');
+            this.log('✅ 图片加载完成', this.endStep('scroll'));
 
             // 获取页面HTML
+            this.startStep('get-content');
             const htmlContent = await page.content();
 
-            console.log('✅ 获取页面内容成功');
+            this.log('✅ 获取页面内容成功', this.endStep('get-content'));
 
             // 处理HTML内容
+            this.startStep('process');
             const result = this.processHtmlContent(htmlContent, url, formats);
+            const processDuration = this.endStep('process');
 
             // 关闭浏览器
+            this.startStep('close');
             await browser.close();
-            console.log('✅ 浏览器已关闭');
+            this.log('✅ 浏览器已关闭', this.endStep('close'));
+
+            this.log('✅ 抓取完成', this.endStep('total'));
 
             return result;
 
         } catch (error) {
-            console.error(`❌ 抓取异常: ${error.message}`);
+            const totalDuration = this.endStep('total');
+            this.logError(`❌ 抓取异常: ${error.message}`, totalDuration);
             if (browser) {
                 await browser.close();
             }
@@ -121,7 +197,9 @@ class WeChatArticleScraper {
         const $ = cheerio.load(htmlContent);
 
         // 提取文章元数据
+        this.startStep('extract-metadata');
         const metadata = this.extractMetadata($);
+        this.endStep('extract-metadata');
 
         // 提取文章主体内容
         let articleContent = $('#js_content');
@@ -130,12 +208,14 @@ class WeChatArticleScraper {
         }
 
         if (!articleContent.length) {
-            console.warn('⚠️  未找到文章内容区域');
+            this.logWarn('⚠️  未找到文章内容区域');
             return null;
         }
 
         // 修复懒加载图片
+        this.startStep('fix-images');
         this.fixLazyImages(articleContent, $);
+        this.endStep('fix-images');
 
         const result = {
             status: 'completed',
@@ -147,12 +227,16 @@ class WeChatArticleScraper {
 
         // 根据需要的格式处理内容
         if (formats.includes('html')) {
+            this.startStep('convert-html');
             result.data.html = articleContent.html();
+            this.endStep('convert-html');
         }
 
         if (formats.includes('markdown')) {
+            this.startStep('convert-markdown');
             const html = articleContent.html();
             result.data.markdown = this.turndownService.turndown(html);
+            this.endStep('convert-markdown');
         }
 
         return result;
@@ -180,11 +264,6 @@ class WeChatArticleScraper {
             || $('meta[property="og:article:author"]').attr('content')
             || '';
 
-        // 提取公众号名称
-        metadata.account = $('#js_name').text().trim()
-            || $('.rich_media_meta_nickname').text().trim()
-            || '';
-
         // 提取发布日期
         const publishDateText = $('#publish_time').text().trim()
             || $('.rich_media_meta_text').text().trim()
@@ -194,36 +273,17 @@ class WeChatArticleScraper {
         if (publishDateText) {
             // 尝试解析日期
             metadata.published_date = this.parsePublishDate(publishDateText);
+        } else {
+            metadata.published_date = '';
         }
-
-        // 提取封面图片
-        metadata.image_url = $('meta[property="og:image"]').attr('content')
-            || $('#js_content img').first().attr('src')
-            || $('#js_content img').first().attr('data-src')
-            || '';
-
-        // 提取摘要/描述
-        metadata.summary = $('meta[name="description"]').attr('content')
-            || $('meta[property="og:description"]').attr('content')
-            || '';
-
-        // 如果没有摘要，从文章内容中提取前200字
-        if (!metadata.summary) {
-            const contentText = $('#js_content').text().trim();
-            metadata.summary = contentText.substring(0, 200).replace(/\s+/g, ' ');
-        }
-
-        // 设置文档类型
-        metadata.category = 'article';
 
         // 来源标记
         metadata.saved_using = 'wechat-scraper-mcp';
 
-        console.log('📋 提取到的元数据:');
-        console.log(`  标题: ${metadata.title || '(未找到)'}`);
-        console.log(`  作者: ${metadata.author || '(未找到)'}`);
-        console.log(`  公众号: ${metadata.account || '(未找到)'}`);
-        console.log(`  发布日期: ${metadata.published_date || '(未找到)'}`);
+        this.log('📋 提取到的元数据:');
+        this.log(`  标题: ${metadata.title || '(未找到)'}`);
+        this.log(`  作者: ${metadata.author || '(未找到)'}`);
+        this.log(`  发布日期: ${metadata.published_date || '(未找到)'}`);
 
         return metadata;
     }
@@ -256,7 +316,7 @@ class WeChatArticleScraper {
                 }
             }
         } catch (error) {
-            console.warn(`⚠️  日期解析失败: ${error.message}`);
+            this.logWarn(`⚠️  日期解析失败: ${error.message}`);
         }
         return '';
     }
@@ -284,7 +344,7 @@ class WeChatArticleScraper {
                 if (realSrc) {
                     $img.attr('src', realSrc);
                     fixedCount++;
-                    console.log(`  ✅ 修复图片: ${realSrc.substring(0, 80)}...`);
+                    this.log(`  ✅ 修复图片: ${realSrc.substring(0, 80)}...`);
                 } else {
                     // 如果没有找到真实URL，尝试从其他属性中查找
                     const attrs = Object.keys($img.attr());
@@ -292,7 +352,7 @@ class WeChatArticleScraper {
                         if (attr.startsWith('data-') && $img.attr(attr).startsWith('http')) {
                             $img.attr('src', $img.attr(attr));
                             fixedCount++;
-                            console.log(`  ✅ 修复图片 (从${attr}): ${$img.attr(attr).substring(0, 80)}...`);
+                            this.log(`  ✅ 修复图片 (从${attr}): ${$img.attr(attr).substring(0, 80)}...`);
                             break;
                         }
                     }
@@ -301,9 +361,9 @@ class WeChatArticleScraper {
         });
 
         if (fixedCount > 0) {
-            console.log(`📸 共修复 ${fixedCount} 张图片`);
+            this.log(`📸 共修复 ${fixedCount} 张图片`);
         } else {
-            console.log('⚠️  未发现需要修复的懒加载图片');
+            this.log('⚠️  未发现需要修复的懒加载图片');
         }
     }
 
@@ -314,9 +374,10 @@ class WeChatArticleScraper {
      */
     async saveResult(result, outputFile) {
         try {
+            this.startStep('save');
             // 保存完整结果为JSON
             await fs.writeFile(outputFile, JSON.stringify(result, null, 2), 'utf-8');
-            console.log(`📄 完整结果已保存到: ${outputFile}`);
+            this.log(`📄 完整结果已保存到: ${outputFile}`);
 
             const data = result.data || {};
 
@@ -324,18 +385,20 @@ class WeChatArticleScraper {
             if (data.markdown) {
                 const markdownFile = outputFile.replace('.json', '.md');
                 await fs.writeFile(markdownFile, data.markdown, 'utf-8');
-                console.log(`📝 Markdown内容已保存到: ${markdownFile}`);
+                this.log(`📝 Markdown内容已保存到: ${markdownFile}`);
             }
 
             // 如果有HTML内容，单独保存
             if (data.html) {
                 const htmlFile = outputFile.replace('.json', '.html');
                 await fs.writeFile(htmlFile, data.html, 'utf-8');
-                console.log(`🌐 HTML内容已保存到: ${htmlFile}`);
+                this.log(`🌐 HTML内容已保存到: ${htmlFile}`);
             }
 
+            this.log('✅ 所有文件保存完成', this.endStep('save'));
+
         } catch (error) {
-            console.error(`❌ 保存文件时出错: ${error.message}`);
+            this.logError(`❌ 保存文件时出错: ${error.message}`, this.endStep('save'));
             throw error;
         }
     }

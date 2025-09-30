@@ -21,6 +21,20 @@ const SERVER_NAME = 'wechat-scraper-server';
 const SERVER_VERSION = '1.0.0';
 
 /**
+ * 带时间戳的日志函数
+ */
+function logWithTimestamp(message, level = 'info') {
+    const timestamp = new Date().toISOString();
+    const levelMap = {
+        'info': console.error,
+        'warn': console.error,
+        'error': console.error
+    };
+    const logger = levelMap[level] || console.error;
+    logger(`[${timestamp}] ${message}`);
+}
+
+/**
  * 创建 MCP Server 实例
  */
 function createServer() {
@@ -125,62 +139,29 @@ function createServer() {
                     };
                 }
 
-                // 构建响应内容
-                const responseContent = [];
+                // 构建 JSON 响应
+                const jsonResponse = {
+                    status: 'success',
+                    url: result.url,
+                    timestamp: result.timestamp,
+                    metadata: result.metadata || {},
+                };
 
-                // 添加基本信息和元数据
-                let infoText = `抓取成功!\n\nURL: ${result.url}\n时间: ${result.timestamp}\n状态: ${result.status}\n`;
-
-                if (result.metadata) {
-                    infoText += `\n## 元数据 (Readwise 格式)\n`;
-                    infoText += `标题: ${result.metadata.title || '(未找到)'}\n`;
-                    infoText += `作者: ${result.metadata.author || '(未找到)'}\n`;
-                    infoText += `公众号: ${result.metadata.account || '(未找到)'}\n`;
-                    infoText += `发布日期: ${result.metadata.published_date || '(未找到)'}\n`;
-                    infoText += `封面图片: ${result.metadata.image_url ? '已提取' : '(未找到)'}\n`;
-                    infoText += `摘要: ${result.metadata.summary ? result.metadata.summary.substring(0, 100) + '...' : '(未找到)'}\n`;
-                    infoText += `文档类型: ${result.metadata.category}\n`;
-                }
-
-                responseContent.push({
-                    type: 'text',
-                    text: infoText,
-                });
-
-                // 添加 Readwise 格式的 JSON
-                responseContent.push({
-                    type: 'text',
-                    text: `\n## Readwise Reader API 格式:\n\n\`\`\`json\n${JSON.stringify({
-                        url: result.url,
-                        html: result.data.html || result.data.markdown,
-                        title: result.metadata?.title,
-                        author: result.metadata?.author,
-                        summary: result.metadata?.summary,
-                        published_date: result.metadata?.published_date,
-                        image_url: result.metadata?.image_url,
-                        category: result.metadata?.category || 'article',
-                        saved_using: result.metadata?.saved_using || 'wechat-scraper-mcp',
-                    }, null, 2)}\n\`\`\``,
-                });
-
-                // 添加 Markdown 内容
+                // 添加 markdown 内容（如果有）
                 if (result.data.markdown) {
-                    responseContent.push({
-                        type: 'text',
-                        text: `\n## Markdown 内容:\n\n${result.data.markdown}`,
-                    });
+                    jsonResponse.markdown = result.data.markdown;
                 }
 
-                // 添加 HTML 内容（如果请求）
-                if (result.data.html && formats.includes('html')) {
-                    responseContent.push({
-                        type: 'text',
-                        text: `\n## HTML 内容:\n\n${result.data.html}`,
-                    });
+                // 添加 HTML 内容（如果有）
+                if (result.data.html) {
+                    jsonResponse.html = result.data.html;
                 }
 
                 return {
-                    content: responseContent,
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify(jsonResponse, null, 2),
+                    }],
                 };
             } catch (error) {
                 return {
@@ -216,7 +197,7 @@ async function startStdio() {
     const server = createServer();
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error('WeChat Scraper MCP Server 运行中 (stdio 模式)...');
+    logWithTimestamp('WeChat Scraper MCP Server 运行中 (stdio 模式)...');
 }
 
 /**
@@ -233,7 +214,7 @@ async function startStreamableHTTP(port = 3000) {
     }));
 
     app.post('/mcp', async (req, res) => {
-        console.error(`新的 MCP 请求: ${req.body.method}`);
+        logWithTimestamp(`新的 MCP 请求: ${req.body.method}`);
 
         const server = createServer();
 
@@ -247,12 +228,12 @@ async function startStreamableHTTP(port = 3000) {
             await transport.handleRequest(req, res, req.body);
 
             res.on('close', () => {
-                console.error('请求已关闭');
+                logWithTimestamp('请求已关闭');
                 transport.close();
                 server.close();
             });
         } catch (error) {
-            console.error('请求处理错误:', error);
+            logWithTimestamp(`请求处理错误: ${error.message}`, 'error');
             if (!res.headersSent) {
                 res.status(500).json({
                     jsonrpc: '2.0',
@@ -291,15 +272,15 @@ async function startStreamableHTTP(port = 3000) {
 
     app.listen(port, (error) => {
         if (error) {
-            console.error('启动服务器失败:', error);
+            logWithTimestamp(`启动服务器失败: ${error.message}`, 'error');
             process.exit(1);
         }
-        console.error(`WeChat Scraper MCP Server 运行在 http://localhost:${port}/mcp (Streamable HTTP 模式)`);
+        logWithTimestamp(`WeChat Scraper MCP Server 运行在 http://localhost:${port}/mcp (Streamable HTTP 模式)`);
     });
 
     // 处理服务器关闭
     process.on('SIGINT', async () => {
-        console.error('正在关闭服务器...');
+        logWithTimestamp('正在关闭服务器...');
         process.exit(0);
     });
 }
@@ -338,7 +319,7 @@ async function main() {
             await startStreamableHTTP(port);
             break;
         default:
-            console.error(`未知的传输模式: ${mode}`);
+            logWithTimestamp(`未知的传输模式: ${mode}`, 'error');
             console.error('用法: node mcp-server.js [stdio|http] [port]');
             console.error('示例:');
             console.error('  node mcp-server.js stdio          # 使用 stdio 模式');
@@ -349,6 +330,6 @@ async function main() {
 
 // 运行服务器
 main().catch((error) => {
-    console.error('启动服务器失败:', error);
+    logWithTimestamp(`启动服务器失败: ${error.message}`, 'error');
     process.exit(1);
 });
