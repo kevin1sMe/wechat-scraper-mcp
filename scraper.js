@@ -121,17 +121,43 @@ class WeChatArticleScraper {
             // 创建新页面
             const page = await browser.newPage();
 
+            // 反检测措施
+            await page.evaluateOnNewDocument(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            });
+
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+            // 设置额外的 HTTP headers
+            await page.setExtraHTTPHeaders({
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            });
+
             // 设置视口大小
             await page.setViewport({ width: 1280, height: 800 });
 
             this.startStep('navigate');
             this.log('✅ 正在导航到页面...');
 
-            // 导航到目标页面
-            await page.goto(url, {
-                waitUntil: 'networkidle0',
-                timeout: 60000
-            });
+            // 导航到目标页面（带重试逻辑）
+            let retries = 3;
+            while (retries > 0) {
+                try {
+                    await page.goto(url, {
+                        waitUntil: 'networkidle0',
+                        timeout: 60000
+                    });
+                    break;
+                } catch (error) {
+                    retries--;
+                    if (retries === 0) {
+                        throw error;
+                    }
+                    this.logWarn(`⚠️  导航失败，还剩 ${retries} 次重试...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+            }
 
             this.log('✅ 页面加载完成', this.endStep('navigate'));
 
