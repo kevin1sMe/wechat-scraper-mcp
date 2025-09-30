@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wechat-scraper
+  labels:
+    app: wechat-scraper
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: wechat-scraper
+  template:
+    metadata:
+      labels:
+        app: wechat-scraper
+    spec:
+      containers:
+      - name: wechat-scraper
+        image: your-registry/namespace/wechat-scraper:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        env:
+        - name: SCRAPELESS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wechat-scraper-secret
+              key: scrapeless-api-key
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+      imagePullSecrets:
+      - name: tcr-secret

@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.github
+*.md
+test.js
+wechat_article_*.json
+wechat_article_*.html
+wechat_article_*.md
+.env
+.env.*
