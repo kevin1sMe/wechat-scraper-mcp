@@ -94,29 +94,40 @@ class WeChatArticleScraper {
             sessionTTL = 180,
             proxyCountry = 'CN',
             sessionRecording = true,
-            formats = ['markdown', 'html']
+            formats = ['markdown', 'html'],
+            proxyRetries = ['CN', 'HK', 'SG']  // 代理重试列表
         } = options;
 
         this.startStep('total');
         this.log(`正在抓取文章: ${url}`);
         this.log(`抓取格式: ${formats.join(', ')}`);
 
-        let browser = null;
+        // 外层循环：尝试不同的代理国家
+        let lastError = null;
+        for (let proxyIndex = 0; proxyIndex < proxyRetries.length; proxyIndex++) {
+            const currentProxy = proxyRetries[proxyIndex];
+            const currentSessionName = `${sessionName}_${currentProxy}_${proxyIndex}`;
 
-        try {
-            // 连接到 Scrapeless Browser
-            this.startStep('connect');
-            this.log('✅ 正在连接到 Scrapeless Browser...');
-            browser = await Puppeteer.connect({
-                apiKey: this.apiKey,
-                sessionName: sessionName,
-                sessionTTL: sessionTTL,
-                proxyCountry: proxyCountry,
-                sessionRecording: sessionRecording,
-                defaultViewport: null
-            });
+            if (proxyIndex > 0) {
+                this.logWarn(`⚠️  使用代理 ${currentProxy} 重试 (${proxyIndex + 1}/${proxyRetries.length})...`);
+            }
 
-            this.log('✅ 浏览器连接成功', this.endStep('connect'));
+            let browser = null;
+
+            try {
+                // 连接到 Scrapeless Browser
+                this.startStep('connect');
+                this.log(`✅ 正在连接到 Scrapeless Browser (代理: ${currentProxy})...`);
+                browser = await Puppeteer.connect({
+                    apiKey: this.apiKey,
+                    sessionName: currentSessionName,
+                    sessionTTL: sessionTTL,
+                    proxyCountry: currentProxy,
+                    sessionRecording: sessionRecording,
+                    defaultViewport: null
+                });
+
+                this.log('✅ 浏览器连接成功', this.endStep('connect'));
 
             // 创建新页面
             const page = await browser.newPage();
@@ -159,57 +170,72 @@ class WeChatArticleScraper {
                 }
             }
 
-            this.log('✅ 页面加载完成', this.endStep('navigate'));
+                this.log('✅ 页面加载完成', this.endStep('navigate'));
 
-            // 等待内容加载
-            this.startStep('wait-content');
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            const waitDuration = this.endStep('wait-content');
+                // 等待内容加载
+                this.startStep('wait-content');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                this.endStep('wait-content');
 
-            // 滚动页面触发懒加载图片
-            this.startStep('scroll');
-            this.log('📜 滚动页面加载图片...');
-            for (let i = 0; i < 5; i++) {
-                await page.evaluate((scrollY) => {
-                    window.scrollTo(0, scrollY);
-                }, 1000 * (i + 1));
+                // 滚动页面触发懒加载图片
+                this.startStep('scroll');
+                this.log('📜 滚动页面加载图片...');
+                for (let i = 0; i < 5; i++) {
+                    await page.evaluate((scrollY) => {
+                        window.scrollTo(0, scrollY);
+                    }, 1000 * (i + 1));
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                // 滚动回顶部
+                await page.evaluate(() => window.scrollTo(0, 0));
                 await new Promise(resolve => setTimeout(resolve, 1000));
-            }
 
-            // 滚动回顶部
-            await page.evaluate(() => window.scrollTo(0, 0));
-            await new Promise(resolve => setTimeout(resolve, 1000));
+                this.log('✅ 图片加载完成', this.endStep('scroll'));
 
-            this.log('✅ 图片加载完成', this.endStep('scroll'));
+                // 获取页面HTML
+                this.startStep('get-content');
+                const htmlContent = await page.content();
 
-            // 获取页面HTML
-            this.startStep('get-content');
-            const htmlContent = await page.content();
+                this.log('✅ 获取页面内容成功', this.endStep('get-content'));
 
-            this.log('✅ 获取页面内容成功', this.endStep('get-content'));
+                // 处理HTML内容
+                this.startStep('process');
+                const result = this.processHtmlContent(htmlContent, url, formats);
+                this.endStep('process');
 
-            // 处理HTML内容
-            this.startStep('process');
-            const result = this.processHtmlContent(htmlContent, url, formats);
-            const processDuration = this.endStep('process');
-
-            // 关闭浏览器
-            this.startStep('close');
-            await browser.close();
-            this.log('✅ 浏览器已关闭', this.endStep('close'));
-
-            this.log('✅ 抓取完成', this.endStep('total'));
-
-            return result;
-
-        } catch (error) {
-            const totalDuration = this.endStep('total');
-            this.logError(`❌ 抓取异常: ${error.message}`, totalDuration);
-            if (browser) {
+                // 关闭浏览器
+                this.startStep('close');
                 await browser.close();
+                this.log('✅ 浏览器已关闭', this.endStep('close'));
+
+                this.log('✅ 抓取完成', this.endStep('total'));
+
+                return result;
+
+            } catch (error) {
+                lastError = error;
+                this.logError(`❌ 代理 ${currentProxy} 抓取失败: ${error.message}`);
+                if (browser) {
+                    try {
+                        await browser.close();
+                    } catch (closeError) {
+                        this.logWarn(`⚠️  关闭浏览器失败: ${closeError.message}`);
+                    }
+                }
+
+                // 如果不是最后一次尝试，等待后继续
+                if (proxyIndex < proxyRetries.length - 1) {
+                    this.logWarn(`⚠️  等待 3 秒后使用下一个代理重试...`);
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
             }
-            throw error;
         }
+
+        // 所有代理都失败了
+        const totalDuration = this.endStep('total');
+        this.logError(`❌ 所有代理尝试均失败`, totalDuration);
+        throw lastError || new Error('抓取失败：所有代理尝试均失败');
     }
 
     /**
