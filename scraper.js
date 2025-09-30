@@ -235,10 +235,21 @@ class WeChatArticleScraper {
      */
     parsePublishDate(dateText) {
         try {
-            // 微信日期格式通常是: "2023-01-01" 或 "2023-01-01 12:00"
-            const match = dateText.match(/(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)/);
-            if (match) {
-                const dateStr = match[1];
+            // 尝试匹配中文日期格式: "2025年09月30日 12:10"
+            const chineseMatch = dateText.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s+(\d{1,2}):(\d{1,2}))?/);
+            if (chineseMatch) {
+                const [, year, month, day, hour = '00', minute = '00'] = chineseMatch;
+                const dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00+08:00`;
+                const date = new Date(dateStr);
+                if (!isNaN(date.getTime())) {
+                    return date.toISOString();
+                }
+            }
+
+            // 尝试匹配标准格式: "2023-01-01" 或 "2023-01-01 12:00"
+            const standardMatch = dateText.match(/(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)/);
+            if (standardMatch) {
+                const dateStr = standardMatch[1];
                 const date = new Date(dateStr);
                 if (!isNaN(date.getTime())) {
                     return date.toISOString();
