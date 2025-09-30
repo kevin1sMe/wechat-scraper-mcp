@@ -1,0 +1,32 @@
+{
+  "name": "wechat-scraper-nodejs",
+  "version": "1.0.0",
+  "description": "使用 Scrapeless SDK 抓取微信公众号文章",
+  "main": "scraper.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test.js",
+    "scrape": "node scraper.js",
+    "mcp": "node mcp-server.js stdio",
+    "mcp:http": "node mcp-server.js http 3000"
+  },
+  "bin": {
+    "wechat-scraper-mcp": "./mcp-server.js"
+  },
+  "keywords": [
+    "wechat",
+    "scraper",
+    "scrapeless"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.2",
+    "@scrapeless-ai/sdk": "^1.0.0",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "puppeteer-core": "^22.0.0",
+    "turndown": "^7.1.2"
+  }
+}
