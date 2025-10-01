@@ -20,6 +20,11 @@ import cors from 'cors';
 const SERVER_NAME = 'wechat-scraper-server';
 const SERVER_VERSION = '1.0.0';
 
+// 从环境变量读取允许的 API Keys（逗号分隔）
+const MCP_API_KEYS = process.env.MCP_API_KEYS
+    ? process.env.MCP_API_KEYS.split(',').map(key => key.trim()).filter(key => key)
+    : [];
+
 /**
  * 带时间戳的日志函数
  */
@@ -32,6 +37,63 @@ function logWithTimestamp(message, level = 'info') {
     };
     const logger = levelMap[level] || console.error;
     logger(`[${timestamp}] ${message}`);
+}
+
+/**
+ * Bearer Token 验证中间件
+ */
+function authenticateRequest(req, res, next) {
+    // 如果没有配置 API Keys，跳过验证
+    if (MCP_API_KEYS.length === 0) {
+        logWithTimestamp('警告: 未配置 MCP_API_KEYS，跳过身份验证', 'warn');
+        return next();
+    }
+
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+        logWithTimestamp('身份验证失败: 缺少 Authorization header', 'warn');
+        return res.status(401).json({
+            jsonrpc: '2.0',
+            error: {
+                code: -32001,
+                message: 'Unauthorized: Missing Authorization header',
+            },
+            id: null,
+        });
+    }
+
+    // 验证 Bearer Token 格式
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+        logWithTimestamp('身份验证失败: Authorization header 格式错误', 'warn');
+        return res.status(401).json({
+            jsonrpc: '2.0',
+            error: {
+                code: -32001,
+                message: 'Unauthorized: Invalid Authorization header format. Expected: Bearer <token>',
+            },
+            id: null,
+        });
+    }
+
+    const token = parts[1];
+
+    // 验证 token 是否在允许列表中
+    if (!MCP_API_KEYS.includes(token)) {
+        logWithTimestamp('身份验证失败: 无效的 API Key', 'warn');
+        return res.status(403).json({
+            jsonrpc: '2.0',
+            error: {
+                code: -32002,
+                message: 'Forbidden: Invalid API Key',
+            },
+            id: null,
+        });
+    }
+
+    logWithTimestamp('身份验证成功');
+    next();
 }
 
 /**
@@ -213,7 +275,7 @@ async function startStreamableHTTP(port = 3000) {
         exposedHeaders: ['Mcp-Session-Id']
     }));
 
-    app.post('/mcp', async (req, res) => {
+    app.post('/mcp', authenticateRequest, async (req, res) => {
         logWithTimestamp(`新的 MCP 请求: ${req.body.method}`);
 
         const server = createServer();
@@ -276,6 +338,11 @@ async function startStreamableHTTP(port = 3000) {
             process.exit(1);
         }
         logWithTimestamp(`WeChat Scraper MCP Server 运行在 http://localhost:${port}/mcp (Streamable HTTP 模式)`);
+        if (MCP_API_KEYS.length > 0) {
+            logWithTimestamp(`身份验证: 已启用 (配置了 ${MCP_API_KEYS.length} 个 API Key)`);
+        } else {
+            logWithTimestamp(`身份验证: 未启用 (未配置 MCP_API_KEYS)`, 'warn');
+        }
     });
 
     // 处理服务器关闭

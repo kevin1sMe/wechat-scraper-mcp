@@ -84,6 +84,20 @@ export SCRAPELESS_API_KEY="your_key_here"
 
 Alternative environment variable name: `SCRAPELESS_API_TOKEN`
 
+**Optional**: Set `MCP_API_KEYS` for HTTP mode authentication:
+```bash
+# Single key
+export MCP_API_KEYS="your-secret-token"
+
+# Multiple keys (comma-separated)
+export MCP_API_KEYS="token1,token2,token3"
+```
+
+Notes:
+- Only required for HTTP mode with authentication enabled
+- stdio mode does not need authentication (local process communication)
+- If not set, HTTP mode runs without authentication (development only)
+
 ## MCP Server Configuration
 
 ### For Claude Desktop (stdio mode)
@@ -103,10 +117,32 @@ Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_deskt
 ```
 
 ### For Remote Access (HTTP mode)
+
+**Without authentication** (MCP_API_KEYS not set):
 ```bash
 curl -X POST http://localhost:3000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "scrape_wechat_article",
+      "arguments": {
+        "url": "https://mp.weixin.qq.com/s/ARTICLE_ID",
+        "formats": ["markdown", "html"]
+      }
+    }
+  }'
+```
+
+**With Bearer Token authentication** (MCP_API_KEYS set):
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer your-secret-token" \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
@@ -145,8 +181,12 @@ MCP mode returns all content in the tool response (no files created).
 - Publish date: `#publish_time`, `.rich_media_meta_text`
 
 **MCP Transport Modes**:
-- stdio: Synchronous request-response over stdin/stdout
+- stdio: Synchronous request-response over stdin/stdout (no authentication needed)
 - Streamable HTTP: SSE-based responses, stateless (new server per request)
+  - Supports optional Bearer Token authentication via `MCP_API_KEYS` environment variable
+  - Authentication middleware (mcp-server.js:42-97) validates `Authorization: Bearer <token>` header
+  - Returns 401/403 errors for invalid/missing tokens when authentication is enabled
+  - Skips authentication if `MCP_API_KEYS` is not set (development mode)
 - SSE mode has been DEPRECATED in MCP spec as of 2024-11-05, use Streamable HTTP instead
 
 ## Module Type

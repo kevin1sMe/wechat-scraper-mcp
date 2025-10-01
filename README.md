@@ -31,6 +31,22 @@ export SCRAPELESS_API_KEY="your_api_key_here"
 echo "SCRAPELESS_API_KEY=your_api_key_here" > .env
 ```
 
+### MCP Server HTTP 模式身份验证（可选）
+
+如果需要为 HTTP 模式启用 Bearer Token 身份验证，可以设置 `MCP_API_KEYS` 环境变量：
+
+```bash
+# 单个 API Key
+export MCP_API_KEYS="your-secret-token"
+
+# 多个 API Keys（逗号分隔）
+export MCP_API_KEYS="token1,token2,token3"
+```
+
+**注意**:
+- 如果不设置 `MCP_API_KEYS`，HTTP 模式将不进行身份验证（仅用于本地开发）
+- stdio 模式不需要此环境变量（本地进程通信已经是安全的）
+
 ## 使用方法
 
 ### 1. 作为独立脚本运行
@@ -98,12 +114,21 @@ node mcp-server.js stdio
 #### Streamable HTTP 模式 (用于远程调用)
 
 ```bash
+# 启动服务器
 npm run mcp:http
 # 或者
+node mcp-server.js http 3000
+
+# 如果需要启用身份验证，先设置 MCP_API_KEYS
+export MCP_API_KEYS="your-secret-token"
 node mcp-server.js http 3000
 ```
 
 然后发送 POST 请求到: `http://localhost:3000/mcp`
+
+**身份验证:**
+- 如果设置了 `MCP_API_KEYS` 环境变量，所有请求必须包含 `Authorization: Bearer <token>` 头
+- 未设置环境变量时，服务器会跳过身份验证（仅用于本地开发）
 
 **注意**: SSE 模式已在 MCP 协议 2024-11-05 版本中弃用，请使用 Streamable HTTP 模式替代。
 
@@ -125,6 +150,7 @@ node mcp-server.js http 3000
 **示例请求 (Streamable HTTP 模式):**
 
 ```bash
+# 无需身份验证（未设置 MCP_API_KEYS）
 curl -X POST http://localhost:3000/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -140,9 +166,29 @@ curl -X POST http://localhost:3000/mcp \
       }
     }
   }'
+
+# 使用 Bearer Token 身份验证（已设置 MCP_API_KEYS）
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer your-secret-token" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "scrape_wechat_article",
+      "arguments": {
+        "url": "https://mp.weixin.qq.com/s/umG_UtpfpEG5riNzfjvpwA",
+        "formats": ["markdown"]
+      }
+    }
+  }'
 ```
 
-**注意**: Streamable HTTP 需要包含 `Accept: application/json, text/event-stream` 头，响应为 SSE 格式。
+**注意**:
+- Streamable HTTP 需要包含 `Accept: application/json, text/event-stream` 头，响应为 SSE 格式
+- 如果服务器启用了身份验证（设置了 `MCP_API_KEYS`），必须包含 `Authorization: Bearer <token>` 头
 
 ## 工作原理
 
