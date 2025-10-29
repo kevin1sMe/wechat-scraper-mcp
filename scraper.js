@@ -351,7 +351,10 @@ class WeChatArticleScraper {
             const chineseMatch = dateText.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s+(\d{1,2}):(\d{1,2}))?/);
             if (chineseMatch) {
                 const [, year, month, day, hour = '00', minute = '00'] = chineseMatch;
+                // 构建东8区时间的ISO字符串，确保时区正确
                 const dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00+08:00`;
+                
+                // 使用更可靠的方式解析带时区的日期
                 const date = new Date(dateStr);
                 if (!isNaN(date.getTime())) {
                     return date.toISOString();
@@ -359,9 +362,12 @@ class WeChatArticleScraper {
             }
 
             // 尝试匹配标准格式: "2023-01-01" 或 "2023-01-01 12:00"
-            const standardMatch = dateText.match(/(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)/);
+            // 注意：微信文章日期通常是东8区（北京时间），需要显式指定时区
+            const standardMatch = dateText.match(/(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
             if (standardMatch) {
-                const dateStr = standardMatch[1];
+                const [, year, month, day, hour = '00', minute = '00', second = '00'] = standardMatch;
+                // 构建带东8区时区的日期字符串
+                const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
                 const date = new Date(dateStr);
                 if (!isNaN(date.getTime())) {
                     return date.toISOString();
