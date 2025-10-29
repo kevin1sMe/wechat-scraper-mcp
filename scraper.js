@@ -328,6 +328,7 @@ class WeChatArticleScraper {
         } else {
             metadata.published_date = '';
         }
+        this.log(`parsePublishDate: ${publishDateText} -> ${metadata.published_date}`);
 
         // 来源标记
         metadata.saved_using = 'wechat-scraper-mcp';
@@ -347,31 +348,62 @@ class WeChatArticleScraper {
      */
     parsePublishDate(dateText) {
         try {
-            // 尝试匹配中文日期格式: "2025年09月30日 12:10"
-            const chineseMatch = dateText.match(/(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s+(\d{1,2}):(\d{1,2}))?/);
-            if (chineseMatch) {
-                const [, year, month, day, hour = '00', minute = '00'] = chineseMatch;
-                // 构建东8区时间的ISO字符串，确保时区正确
-                const dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00+08:00`;
-                
-                // 使用更可靠的方式解析带时区的日期
-                const date = new Date(dateStr);
-                if (!isNaN(date.getTime())) {
-                    return date.toISOString();
-                }
+            if (!dateText) return '';
+
+            // 预处理：去除无关前缀，规范空白
+            let text = String(dateText)
+                .trim()
+                .replace(/(?:发布时间[:：]?|发布于|北京时间)/g, '')
+                .replace(/\s+/g, ' ');
+
+            // 1) 直接支持带时区的 ISO/RFC3339（包含 Z 或 +08:00 或 +0800），允许 T 或 空格 分隔
+            // 示例：2025-10-29T16:21:00+0800 或 2025-10-29 16:21:00+08:00 或 2025-10-29T08:21:00Z
+            const isoTzMatch = text.match(/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?)?(?:Z|[+-]\d{2}:?\d{2})/i);
+            if (isoTzMatch) {
+                // 规范化成浏览器/Node 可解析的形式：空格->T，+0800 -> +08:00
+                let isoLike = isoTzMatch[0].replace(' ', 'T').replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+                const d = new Date(isoLike);
+                if (!isNaN(d.getTime())) return d.toISOString();
             }
 
-            // 尝试匹配标准格式: "2023-01-01" 或 "2023-01-01 12:00"
-            // 注意：微信文章日期通常是东8区（北京时间），需要显式指定时区
-            const standardMatch = dateText.match(/(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
-            if (standardMatch) {
-                const [, year, month, day, hour = '00', minute = '00', second = '00'] = standardMatch;
-                // 构建带东8区时区的日期字符串
-                const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
-                const date = new Date(dateStr);
-                if (!isNaN(date.getTime())) {
-                    return date.toISOString();
-                }
+            // 2) 中文日期（可选年份）+ 可选 上午/下午/AM/PM + 时间
+            // 示例：2025年10月29日 下午 4:21 / 10月29日 16:21
+            const cnMatch = text.match(/(?:(\d{4})年)?\s*(\d{1,2})月\s*(\d{1,2})日\s*(?:([上下]午|AM|PM)\s*)?(\d{1,2})(?::(\d{1,2})(?::(\d{1,2}))?)?/i);
+            if (cnMatch) {
+                let [, year, month, day, ampm = '', hour = '0', minute = '0', second = '0'] = cnMatch;
+                const y = year || String(new Date().getFullYear());
+                let h = parseInt(hour, 10);
+                if (/(下午|PM)/i.test(ampm) && h < 12) h += 12;
+                if (/(上午|AM)/i.test(ampm) && h === 12) h = 0;
+                const m = String(parseInt(month, 10)).padStart(2, '0');
+                const d = String(parseInt(day, 10)).padStart(2, '0');
+                const mm = String(parseInt(minute, 10)).padStart(2, '0');
+                const ss = String(parseInt(second, 10)).padStart(2, '0');
+                const withTz = `${y}-${m}-${d}T${String(h).padStart(2, '0')}:${mm}:${ss}+08:00`;
+                const dt = new Date(withTz);
+                if (!isNaN(dt.getTime())) return dt.toISOString();
+            }
+
+            // 3) 标准日期：YYYY-MM-DD [T|空格] HH:mm[:ss] + 可选 上午/下午/AM/PM
+            // 示例：2025-10-29 16:21, 2025-10-29T4:21 PM
+            const stdMatch = text.match(/(\d{4})-(\d{2})-(\d{2})[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([上下]午|AM|PM))?/i);
+            if (stdMatch) {
+                let [, year, month, day, hour, minute, second = '00', ampm = ''] = stdMatch;
+                let h = parseInt(hour, 10);
+                if (/(下午|PM)/i.test(ampm) && h < 12) h += 12;
+                if (/(上午|AM)/i.test(ampm) && h === 12) h = 0;
+                const withTz = `${year}-${month}-${day}T${String(h).padStart(2, '0')}:${minute}:${second}+08:00`;
+                const dt = new Date(withTz);
+                if (!isNaN(dt.getTime())) return dt.toISOString();
+            }
+
+            // 4) 兜底：仅日期（YYYY-MM-DD）或日期+时间（无时区），默认按东八区处理
+            const fallbackMatch = text.match(/(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+            if (fallbackMatch) {
+                const [, year, month, day, hour = '00', minute = '00', second = '00'] = fallbackMatch;
+                const withTz = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
+                const dt = new Date(withTz);
+                if (!isNaN(dt.getTime())) return dt.toISOString();
             }
         } catch (error) {
             this.logWarn(`⚠️  日期解析失败: ${error.message}`);

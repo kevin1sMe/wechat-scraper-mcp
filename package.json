@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node test.js",
+    "test:dates": "node tests/parsePublishDate.test.js",
     "scrape": "node scraper.js",
     "mcp": "node mcp-server.js stdio",
     "mcp:http": "node mcp-server.js http 3000"
