@@ -15,6 +15,7 @@ import {
 import { WeChatArticleScraper } from './scraper.js';
 import express from 'express';
 import cors from 'cors';
+import { promises as fs } from 'fs';
 
 // 服务器配置
 const SERVER_NAME = 'wechat-scraper-server';
@@ -217,6 +218,16 @@ function createServer() {
                 // 添加 HTML 内容（如果有）
                 if (result.data.html) {
                     jsonResponse.html = result.data.html;
+                }
+
+                // 将结果写入 JSON 文件
+                try {
+                    const timestampForFile = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                    const outputFile = `wechat_article_${timestampForFile}.json`;
+                    await fs.writeFile(outputFile, JSON.stringify(jsonResponse, null, 2), 'utf-8');
+                    logWithTimestamp(`结果已保存到文件: ${outputFile}`);
+                } catch (writeErr) {
+                    logWithTimestamp(`保存结果到文件失败: ${writeErr.message}`, 'warn');
                 }
 
                 return {
