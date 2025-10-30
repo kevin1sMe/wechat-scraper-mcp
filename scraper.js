@@ -233,17 +233,8 @@ class WeChatArticleScraper {
         this.log(`正在抓取文章: ${url}`);
         this.log(`抓取格式: ${formats.join(', ')}`);
 
-        // 如果设置了自定义代理，不使用代理重试
-        if (proxyURL) {
-            this.log(`使用自定义代理: ${proxyURL}`);
-            return await this.scrapeWithProxy(url, {
-                sessionName,
-                sessionTTL,
-                proxyURL,
-                sessionRecording,
-                formats
-            });
-        }
+        // 调整策略：即使配置了自定义代理，也优先尝试官方代理；
+        // 当官方代理全部失败后，再回退到自定义代理。
 
         // 外层循环：尝试不同的代理国家
         let lastError = null;
@@ -381,7 +372,21 @@ class WeChatArticleScraper {
             }
         }
 
-        // 所有代理都失败了
+        // 所有官方代理都失败了，尝试使用自定义代理（如果提供）
+        if (proxyURL) {
+            this.logWarn('⚠️  官方代理全部失败，尝试使用自定义代理...');
+            const result = await this.scrapeWithProxy(url, {
+                sessionName,
+                sessionTTL,
+                proxyURL,
+                sessionRecording,
+                formats
+            });
+            this.endStep('total');
+            return result;
+        }
+
+        // 没有可用的自定义代理，直接失败
         const totalDuration = this.endStep('total');
         this.logError(`❌ 所有代理尝试均失败`, totalDuration);
         throw lastError || new Error('抓取失败：所有代理尝试均失败');

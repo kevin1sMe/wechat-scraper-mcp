@@ -41,6 +41,26 @@ function logWithTimestamp(message, level = 'info') {
 }
 
 /**
+ * 从环境变量中解析标准代理 URL
+ * 支持: HTTPS_PROXY/https_proxy 优先, 其次 HTTP_PROXY/http_proxy, 最后 ALL_PROXY/all_proxy
+ */
+function getEnvProxyURL() {
+    const candidates = [
+        process.env.HTTPS_PROXY,
+        process.env.https_proxy,
+        process.env.HTTP_PROXY,
+        process.env.http_proxy,
+        process.env.ALL_PROXY,
+        process.env.all_proxy,
+    ];
+    const url = candidates.find(Boolean) || null;
+    if (url) {
+        logWithTimestamp(`检测到环境代理配置，将作为备用代理使用: ${url}`);
+    }
+    return url;
+}
+
+/**
  * Bearer Token 验证中间件
  */
 function authenticateRequest(req, res, next) {
@@ -186,11 +206,15 @@ function createServer() {
                 const scraper = new WeChatArticleScraper(apiKey);
 
                 // 抓取文章
+                // 允许通过环境变量设置标准代理作为备用自定义代理
+                const envProxyURL = getEnvProxyURL();
+                const effectiveProxyURL = proxyURL || envProxyURL || null;
                 const result = await scraper.scrapeArticle(url, {
                     sessionName: sessionName || `wechat_${Date.now()}`,
                     sessionTTL: sessionTTL || 180,
                     proxyCountry: proxyCountry || 'CN',
-                    proxyURL: proxyURL || null,
+                    // 按需传入代理URL（仅作为官方代理失败后的兜底）
+                    proxyURL: effectiveProxyURL,
                     sessionRecording: true,
                     formats: formats,
                 });

@@ -31,6 +31,22 @@ export SCRAPELESS_API_KEY="your_api_key_here"
 echo "SCRAPELESS_API_KEY=your_api_key_here" > .env
 ```
 
+### 代理配置（可选）
+
+可以通过标准环境变量为抓取设置自定义代理（作为官方代理失败后的兜底）：
+
+```bash
+# 优先级：HTTPS_PROXY/https_proxy > HTTP_PROXY/http_proxy > ALL_PROXY/all_proxy
+export HTTPS_PROXY="http://user:pass@proxy.example.com:8443"
+# 或
+export HTTP_PROXY="http://user:pass@proxy.example.com:8080"
+```
+
+行为说明：
+- 抓取时始终优先使用 Scrapeless 官方代理（按国家轮询）。
+- 当官方代理全部失败后，若配置了 `HTTP(S)_PROXY`/`ALL_PROXY` 或在工具参数中提供了 `proxyURL`，将回退到该自定义代理重试。
+- 工具参数中的 `proxyURL` 优先级高于环境变量。
+
 ### MCP Server HTTP 模式身份验证（可选）
 
 如果需要为 HTTP 模式启用 Bearer Token 身份验证，可以设置 `MCP_API_KEYS` 环境变量：
