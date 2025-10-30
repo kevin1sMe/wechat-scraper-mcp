@@ -147,8 +147,12 @@ function createServer() {
                             },
                             proxyCountry: {
                                 type: 'string',
-                                description: '代理国家代码，默认 CN',
+                                description: '代理国家代码，默认 CN（当 proxyURL 未设置时使用）',
                                 default: 'CN',
+                            },
+                            proxyURL: {
+                                type: 'string',
+                                description: '自定义代理 URL，例如: http://user:pass@proxy.com:8080（可选）',
                             },
                         },
                         required: ['url'],
@@ -161,7 +165,7 @@ function createServer() {
     // 注册 call_tool 处理器
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (request.params.name === 'scrape_wechat_article') {
-            const { url, formats = ['markdown', 'html'], sessionName, sessionTTL, proxyCountry } = request.params.arguments;
+            const { url, formats = ['markdown', 'html'], sessionName, sessionTTL, proxyCountry, proxyURL } = request.params.arguments;
 
             try {
                 // 检查 API Key
@@ -186,6 +190,7 @@ function createServer() {
                     sessionName: sessionName || `wechat_${Date.now()}`,
                     sessionTTL: sessionTTL || 180,
                     proxyCountry: proxyCountry || 'CN',
+                    proxyURL: proxyURL || null,
                     sessionRecording: true,
                     formats: formats,
                 });
@@ -237,11 +242,17 @@ function createServer() {
                     }],
                 };
             } catch (error) {
+                // 输出详细错误到日志
+                logWithTimestamp(`抓取异常: ${error.message}`, 'error');
+                if (error.stack) {
+                    logWithTimestamp(`错误堆栈: ${error.stack}`, 'error');
+                }
+
                 return {
                     content: [
                         {
                             type: 'text',
-                            text: `抓取异常: ${error.message}`,
+                            text: `抓取异常: ${error.message}\n\n详细信息: ${error.stack || '无堆栈信息'}`,
                         },
                     ],
                     isError: true,

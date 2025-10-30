@@ -83,6 +83,136 @@ class WeChatArticleScraper {
     }
 
     /**
+     * 使用自定义代理抓取文章
+     * @param {string} url - 文章URL
+     * @param {Object} options - 配置选项
+     * @returns {Object} 抓取结果
+     */
+    async scrapeWithProxy(url, options = {}) {
+        const {
+            sessionName,
+            sessionTTL,
+            proxyURL,
+            sessionRecording,
+            formats
+        } = options;
+
+        const currentSessionName = `${sessionName}_custom_proxy`;
+
+        let browser = null;
+
+        try {
+            // 连接到 Scrapeless Browser（使用自定义代理）
+            this.startStep('connect');
+            this.log(`✅ 正在连接到 Scrapeless Browser (自定义代理: ${proxyURL})...`);
+            browser = await Puppeteer.connect({
+                apiKey: this.apiKey,
+                sessionName: currentSessionName,
+                sessionTTL: sessionTTL,
+                proxyURL: proxyURL,  // 使用自定义代理
+                sessionRecording: sessionRecording,
+                defaultViewport: null
+            });
+
+            this.log('✅ 浏览器连接成功', this.endStep('connect'));
+
+            // 创建新页面
+            const page = await browser.newPage();
+
+            // 反检测措施
+            await page.evaluateOnNewDocument(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            });
+
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+            // 设置额外的 HTTP headers
+            await page.setExtraHTTPHeaders({
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            });
+
+            // 设置视口大小
+            await page.setViewport({ width: 1280, height: 800 });
+
+            this.startStep('navigate');
+            this.log('✅ 正在导航到页面...');
+
+            // 导航到目标页面（带重试逻辑）
+            let retries = 3;
+            while (retries > 0) {
+                try {
+                    await page.goto(url, {
+                        waitUntil: 'networkidle0',
+                        timeout: 60000
+                    });
+                    break;
+                } catch (error) {
+                    retries--;
+                    if (retries === 0) {
+                        throw error;
+                    }
+                    this.logWarn(`⚠️  导航失败，还剩 ${retries} 次重试...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+            }
+
+            this.log('✅ 页面加载完成', this.endStep('navigate'));
+
+            // 等待内容加载
+            this.startStep('wait-content');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            this.endStep('wait-content');
+
+            // 滚动页面触发懒加载图片
+            this.startStep('scroll');
+            this.log('📜 滚动页面加载图片...');
+            for (let i = 0; i < 5; i++) {
+                await page.evaluate((scrollY) => {
+                    window.scrollTo(0, scrollY);
+                }, 1000 * (i + 1));
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            // 滚动回顶部
+            await page.evaluate(() => window.scrollTo(0, 0));
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            this.log('✅ 图片加载完成', this.endStep('scroll'));
+
+            // 获取页面HTML
+            this.startStep('get-content');
+            const htmlContent = await page.content();
+            this.log('✅ 获取页面内容成功', this.endStep('get-content'));
+
+            // 处理HTML内容
+            this.startStep('process');
+            const result = this.processHtmlContent(htmlContent, url, formats);
+            this.endStep('process');
+
+            // 关闭浏览器
+            this.startStep('close');
+            await browser.close();
+            this.log('✅ 浏览器已关闭', this.endStep('close'));
+
+            this.log('✅ 抓取完成', this.endStep('total'));
+
+            return result;
+
+        } catch (error) {
+            this.logError(`❌ 自定义代理抓取失败: ${error.message}`);
+            if (browser) {
+                try {
+                    await browser.close();
+                } catch (closeError) {
+                    this.logWarn(`⚠️  关闭浏览器失败: ${closeError.message}`);
+                }
+            }
+            throw error;
+        }
+    }
+
+    /**
      * 抓取微信公众号文章
      * @param {string} url - 文章URL
      * @param {Object} options - 配置选项
@@ -95,12 +225,25 @@ class WeChatArticleScraper {
             proxyCountry = 'CN',
             sessionRecording = true,
             formats = ['markdown', 'html'],
-            proxyRetries = ['CN', 'HK', 'SG']  // 代理重试列表
+            proxyRetries = ['CN', 'HK', 'SG'],  // 代理重试列表
+            proxyURL = null  // 自定义代理 URL（可选）
         } = options;
 
         this.startStep('total');
         this.log(`正在抓取文章: ${url}`);
         this.log(`抓取格式: ${formats.join(', ')}`);
+
+        // 如果设置了自定义代理，不使用代理重试
+        if (proxyURL) {
+            this.log(`使用自定义代理: ${proxyURL}`);
+            return await this.scrapeWithProxy(url, {
+                sessionName,
+                sessionTTL,
+                proxyURL,
+                sessionRecording,
+                formats
+            });
+        }
 
         // 外层循环：尝试不同的代理国家
         let lastError = null;
@@ -215,7 +358,13 @@ class WeChatArticleScraper {
 
             } catch (error) {
                 lastError = error;
+                // 改进错误显示：输出完整的错误对象
+                const errorDetails = error?.response?.error || error?.error || error;
+                const errorString = typeof errorDetails === 'object'
+                    ? JSON.stringify(errorDetails, null, 2)
+                    : errorDetails;
                 this.logError(`❌ 代理 ${currentProxy} 抓取失败: ${error.message}`);
+                this.logError(`详细错误: ${errorString}`);
                 if (browser) {
                     try {
                         await browser.close();
