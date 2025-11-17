@@ -407,13 +407,9 @@ class WeChatArticleScraper {
         const metadata = this.extractMetadata($);
         this.endStep('extract-metadata');
 
-        // 提取文章主体内容
-        let articleContent = $('#js_content');
-        if (!articleContent.length) {
-            articleContent = $('.rich_media_content');
-        }
-
-        if (!articleContent.length) {
+        // 提取文章主体内容（支持多站点，含微信与通用站点）
+        const articleContent = this.findArticleContent($, url);
+        if (!articleContent || !articleContent.length) {
             this.logWarn('⚠️  未找到文章内容区域');
             return null;
         }
@@ -446,6 +442,92 @@ class WeChatArticleScraper {
         }
 
         return result;
+    }
+
+    /**
+     * 根据URL智能查找文章主体容器，支持多站点扩展
+     * - 先按域名匹配特定站点选择器（如微信、Mowen）
+     * - 再尝试一组通用选择器
+     * - 命中后记录使用的选择器，便于后续扩展与调试
+     * @param {import('cheerio').CheerioAPI} $
+     * @param {string} url
+     * @returns {import('cheerio').Cheerio}
+     */
+    findArticleContent($, url) {
+        let hostname = '';
+        try {
+            hostname = new URL(url).hostname;
+        } catch (_) {
+            // ignore
+        }
+
+        // 站点特定选择器（可持续扩展）
+        const siteConfigs = [
+            {
+                test: /(^|\.)mp\.weixin\.qq\.com$/i,
+                selectors: [
+                    '#js_content',
+                    '.rich_media_content'
+                ]
+            },
+            {
+                // Mowen（示例）：主体通常在 class="doc" 下
+                test: /mowen.cn/i,
+                selectors: [
+                    'div.doc',
+                    '.doc'
+                ]
+            }
+        ];
+
+        // 通用选择器（常见博客/文档系统）
+        const genericSelectors = [
+            'article',
+            'main article',
+            '.article-content',
+            '.post-content',
+            '.entry-content',
+            '.markdown-body',
+            '.content article',
+            'main .content',
+            '#content article',
+            '#content',
+        ];
+
+        // 1) 站点定制匹配
+        if (hostname) {
+            const site = siteConfigs.find(cfg => cfg.test.test(hostname));
+            if (site) {
+                for (const sel of site.selectors) {
+                    const node = $(sel);
+                    if (node && node.length) {
+                        this.log(`🔎 使用站点选择器(${hostname}): ${sel}`);
+                        return node.first();
+                    }
+                }
+            }
+        }
+
+        // 2) 微信选择器（向后兼容：即使域名没匹配，也尝试一次）
+        for (const sel of ['#js_content', '.rich_media_content']) {
+            const node = $(sel);
+            if (node && node.length) {
+                this.log(`🔎 使用微信选择器: ${sel}`);
+                return node.first();
+            }
+        }
+
+        // 3) 通用选择器
+        for (const sel of genericSelectors) {
+            const node = $(sel);
+            if (node && node.length) {
+                this.log(`🔎 使用通用选择器: ${sel}`);
+                return node.first();
+            }
+        }
+
+        // 未匹配到
+        return $();
     }
 
     /**
